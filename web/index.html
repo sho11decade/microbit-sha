@@ -104,20 +104,81 @@ body {
 
 <script>
 // ============================================================
-// Web Bluetooth - Micro:bit UART Service
+// Web Bluetooth - Micro:bit UART Service (Nordic UART Service)
 // ============================================================
 const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const UART_TX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify (micro:bit TX -> browser RX)
 
+// Maximum number of retries when the UART service is not immediately available
+const SERVICE_DISCOVERY_RETRIES = 3;
+const SERVICE_DISCOVERY_DELAY_MS = 1000;
 
 let bleDevice = null;
+let bleServer = null;
 let connected = false;
 let receiveBuffer = '';
 
 // Controller state from micro:bit
 const controller = { aimX: 0, aimY: 0, fire: false };
 
+// Check for secure context (Web Bluetooth requires HTTPS or localhost)
+function checkSecureContext() {
+  if (window.location.protocol === 'file:') {
+    const msg = 'Web Bluetooth は file:// では動作しません。\n'
+      + 'ローカルサーバー経由で開いてください:\n'
+      + '  python -m http.server 8000\n'
+      + '  → http://localhost:8000/index.html';
+    alert(msg);
+    console.warn(msg);
+    return false;
+  }
+  if (!window.isSecureContext) {
+    const msg = 'Web Bluetooth には HTTPS または localhost が必要です。';
+    alert(msg);
+    console.warn(msg);
+    return false;
+  }
+  if (!navigator.bluetooth) {
+    const msg = 'このブラウザは Web Bluetooth に対応していません。\nChrome または Edge をお使いください。';
+    alert(msg);
+    console.warn(msg);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Attempt to get the UART service with retries.
+ * Some micro:bit firmware versions need a brief delay before
+ * GATT services become discoverable after connection.
+ */
+async function getUartServiceWithRetry(server) {
+  let lastError;
+  for (let attempt = 1; attempt <= SERVICE_DISCOVERY_RETRIES; attempt++) {
+    try {
+      return await server.getPrimaryService(UART_SERVICE_UUID);
+    } catch (err) {
+      lastError = err;
+      console.warn(`UART service discovery attempt ${attempt}/${SERVICE_DISCOVERY_RETRIES} failed:`, err.message);
+      if (attempt < SERVICE_DISCOVERY_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, SERVICE_DISCOVERY_DELAY_MS));
+        // Ensure still connected before retrying
+        if (!server.connected) {
+          try {
+            await server.connect();
+          } catch (reconnectErr) {
+            console.warn('Reconnection failed during service discovery retry:', reconnectErr.message);
+          }
+        }
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function connectBLE() {
+  if (!checkSecureContext()) return;
+
   const btn = document.getElementById('connectBtn');
   btn.disabled = true;
   try {
@@ -127,8 +188,22 @@ async function connectBLE() {
     });
     bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
-    const server = await bleDevice.gatt.connect();
-    const service = await server.getPrimaryService(UART_SERVICE_UUID);
+    updateStatusText('接続中...');
+    bleServer = await bleDevice.gatt.connect();
+
+    let service;
+    try {
+      service = await getUartServiceWithRetry(bleServer);
+    } catch (err) {
+      const hint = 'UART サービスが見つかりません。\n'
+        + 'micro:bit のファームウェアで Bluetooth (UART) が有効か確認してください。\n'
+        + 'python.microbit.org でフラッシュ時に Bluetooth を有効にしてください。';
+      console.error(hint, err);
+      alert(hint);
+      updateStatus(false);
+      btn.disabled = false;
+      return;
+    }
 
     const txChar = await service.getCharacteristic(UART_TX_UUID);
     await txChar.startNotifications();
@@ -138,6 +213,13 @@ async function connectBLE() {
     updateStatus(true);
   } catch (err) {
     console.error('BLE connection error:', err);
+    if (err.name === 'NotFoundError') {
+      alert('micro:bit が見つからないか、ペアリングがキャンセルされました。');
+    } else if (err.name === 'SecurityError') {
+      alert('BLE 接続にはユーザー操作が必要です。ボタンをクリックして接続してください。');
+    } else {
+      alert('BLE 接続エラー: ' + err.message);
+    }
     updateStatus(false);
   }
   btn.disabled = false;
@@ -146,6 +228,12 @@ async function connectBLE() {
 function onDisconnected() {
   connected = false;
   updateStatus(false);
+}
+
+function updateStatusText(text) {
+  const el = document.getElementById('status');
+  el.textContent = text;
+  el.className = '';
 }
 
 function updateStatus(isConnected) {
