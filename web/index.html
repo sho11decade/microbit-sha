@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Micro:bit Shooting Game - Web Bluetooth</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #111;
+  color: #eee;
+  font-family: 'Segoe UI', sans-serif;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#header {
+  width: 100%;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #1a1a2e;
+  z-index: 10;
+}
+#header h1 { font-size: 1.2em; }
+#status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  background: #333;
+}
+#status.connected { background: #0a6; color: #fff; }
+#status.disconnected { background: #a00; color: #fff; }
+#connectBtn {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 6px;
+  background: #0af;
+  color: #fff;
+  font-size: 1em;
+  cursor: pointer;
+}
+#connectBtn:hover { background: #09d; }
+#connectBtn:disabled { background: #555; cursor: not-allowed; }
+#gameCanvas {
+  display: block;
+  flex: 1;
+  width: 100%;
+}
+#overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+#overlay.hidden { display: none; }
+#overlay h2 { font-size: 2em; margin-bottom: 20px; }
+#overlay p { font-size: 1.2em; margin-bottom: 10px; }
+#overlay button {
+  padding: 12px 30px;
+  border: none;
+  border-radius: 8px;
+  background: #0af;
+  color: #fff;
+  font-size: 1.1em;
+  cursor: pointer;
+  margin-top: 20px;
+}
+#debug {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  font-size: 0.75em;
+  color: #666;
+  z-index: 50;
+}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>🎯 Micro:bit Shooting Game</h1>
+  <span id="status" class="disconnected">未接続</span>
+  <button id="connectBtn" onclick="connectBLE()">Micro:bit に接続</button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="overlay">
+  <h2 id="overlayTitle">Micro:bit Shooting Game</h2>
+  <p id="overlayMsg">Micro:bit に接続してゲームを開始してください</p>
+  <p style="font-size:0.9em; color:#aaa;">Pin1のスイッチで発射 / 傾きでエイム</p>
+  <button onclick="startGame()">ゲーム開始</button>
+</div>
+
+<div id="debug"></div>
+
+<script>
+// ============================================================
+// Web Bluetooth - Micro:bit UART Service
+// ============================================================
+const UART_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const UART_TX_UUID      = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // Notify (micro:bit TX -> browser RX)
+
+
+let bleDevice = null;
+let connected = false;
+let receiveBuffer = '';
+
+// Controller state from micro:bit
+const controller = { aimX: 0, aimY: 0, fire: false };
+
+async function connectBLE() {
+  const btn = document.getElementById('connectBtn');
+  btn.disabled = true;
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'BBC micro:bit' }],
+      optionalServices: [UART_SERVICE_UUID]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+    const server = await bleDevice.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE_UUID);
+
+    const txChar = await service.getCharacteristic(UART_TX_UUID);
+    await txChar.startNotifications();
+    txChar.addEventListener('characteristicvaluechanged', onTxData);
+
+    connected = true;
+    updateStatus(true);
+  } catch (err) {
+    console.error('BLE connection error:', err);
+    updateStatus(false);
+  }
+  btn.disabled = false;
+}
+
+function onDisconnected() {
+  connected = false;
+  updateStatus(false);
+}
+
+function updateStatus(isConnected) {
+  const el = document.getElementById('status');
+  if (isConnected) {
+    el.textContent = '接続済み';
+    el.className = 'connected';
+  } else {
+    el.textContent = '未接続';
+    el.className = 'disconnected';
+  }
+}
+
+function onTxData(event) {
+  const value = event.target.value;
+  const decoder = new TextDecoder();
+  receiveBuffer += decoder.decode(value);
+
+  let newlineIdx;
+  while ((newlineIdx = receiveBuffer.indexOf('\n')) !== -1) {
+    const line = receiveBuffer.substring(0, newlineIdx).trim();
+    receiveBuffer = receiveBuffer.substring(newlineIdx + 1);
+    parseLine(line);
+  }
+}
+
+function parseLine(line) {
+  if (line === 'F') {
+    controller.fire = true;
+  } else if (line.startsWith('A:')) {
+    const parts = line.substring(2).split(',');
+    if (parts.length === 2) {
+      controller.aimX = parseInt(parts[0], 10) || 0;
+      controller.aimY = parseInt(parts[1], 10) || 0;
+    }
+  }
+}
+
+// ============================================================
+// Shooting Game
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let gameRunning = false;
+let score = 0;
+let timeLeft = 30; // seconds
+let targets = [];
+let bullets = [];
+let explosions = [];
+let crosshair = { x: 0, y: 0 };
+let lastTime = 0;
+let spawnTimer = 0;
+let timerInterval = null;
+
+// Keyboard/mouse fallback for testing without micro:bit
+let keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; });
+document.addEventListener('keyup', e => {
+  keys[e.key] = false;
+  if (e.key === ' ') controller.fire = true;
+});
+canvas.addEventListener('mousemove', e => {
+  if (!connected) {
+    crosshair.x = e.clientX;
+    crosshair.y = e.clientY - document.getElementById('header').offsetHeight;
+  }
+});
+canvas.addEventListener('click', () => {
+  if (!connected) controller.fire = true;
+});
+
+function resizeCanvas() {
+  const headerH = document.getElementById('header').offsetHeight;
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight - headerH;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function startGame() {
+  document.getElementById('overlay').classList.add('hidden');
+  score = 0;
+  timeLeft = 30;
+  targets = [];
+  bullets = [];
+  explosions = [];
+  crosshair.x = canvas.width / 2;
+  crosshair.y = canvas.height / 2;
+  gameRunning = true;
+  spawnTimer = 0;
+
+  if (timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    if (gameRunning) {
+      timeLeft--;
+      if (timeLeft <= 0) endGame();
+    }
+  }, 1000);
+
+  lastTime = performance.now();
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+  gameRunning = false;
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  const overlay = document.getElementById('overlay');
+  document.getElementById('overlayTitle').textContent = 'ゲーム終了！';
+  document.getElementById('overlayMsg').textContent = `スコア: ${score}`;
+  overlay.classList.remove('hidden');
+}
+
+function spawnTarget() {
+  const size = 30 + Math.random() * 40;
+  const x = size + Math.random() * (canvas.width - size * 2);
+  const y = size + Math.random() * (canvas.height - size * 2);
+  const speed = 0.5 + Math.random() * 1.5;
+  const angle = Math.random() * Math.PI * 2;
+  targets.push({
+    x, y, size,
+    vx: Math.cos(angle) * speed,
+    vy: Math.sin(angle) * speed,
+    hp: 1,
+    color: `hsl(${Math.random() * 60}, 80%, 55%)`
+  });
+}
+
+function gameLoop(timestamp) {
+  if (!gameRunning) return;
+  const dt = Math.min(timestamp - lastTime, 50);
+  lastTime = timestamp;
+
+  update(dt);
+  draw();
+
+  requestAnimationFrame(gameLoop);
+}
+
+function update(dt) {
+  // --- Crosshair from micro:bit accelerometer ---
+  // Map accelerometer (-1024..1024) to screen position
+  const sensitivity = 0.5;
+  if (connected) {
+    crosshair.x = canvas.width / 2 + (controller.aimX / 1024) * (canvas.width / 2) * sensitivity;
+    crosshair.y = canvas.height / 2 + (controller.aimY / 1024) * (canvas.height / 2) * sensitivity;
+  } else {
+    // Keyboard fallback
+    if (keys['ArrowLeft'])  crosshair.x -= 5 * dt * 0.3;
+    if (keys['ArrowRight']) crosshair.x += 5 * dt * 0.3;
+    if (keys['ArrowUp'])    crosshair.y -= 5 * dt * 0.3;
+    if (keys['ArrowDown'])  crosshair.y += 5 * dt * 0.3;
+  }
+  crosshair.x = Math.max(0, Math.min(canvas.width, crosshair.x));
+  crosshair.y = Math.max(0, Math.min(canvas.height, crosshair.y));
+
+  // --- Fire ---
+  if (controller.fire) {
+    controller.fire = false;
+    bullets.push({ x: crosshair.x, y: crosshair.y, radius: 8, life: 300 });
+    // Check hit
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      const dx = crosshair.x - t.x;
+      const dy = crosshair.y - t.y;
+      if (Math.sqrt(dx * dx + dy * dy) < t.size) {
+        t.hp--;
+        if (t.hp <= 0) {
+          explosions.push({ x: t.x, y: t.y, size: t.size, life: 400, maxLife: 400 });
+          targets.splice(i, 1);
+          score += 10;
+        }
+      }
+    }
+  }
+
+  // --- Move targets ---
+  for (const t of targets) {
+    t.x += t.vx * dt * 0.1;
+    t.y += t.vy * dt * 0.1;
+    if (t.x < t.size || t.x > canvas.width - t.size) t.vx *= -1;
+    if (t.y < t.size || t.y > canvas.height - t.size) t.vy *= -1;
+  }
+
+  // --- Spawn targets ---
+  spawnTimer += dt;
+  if (spawnTimer > 1500 && targets.length < 6) {
+    spawnTarget();
+    spawnTimer = 0;
+  }
+
+  // --- Update bullets ---
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    bullets[i].life -= dt;
+    if (bullets[i].life <= 0) bullets.splice(i, 1);
+  }
+
+  // --- Update explosions ---
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].life -= dt;
+    if (explosions[i].life <= 0) explosions.splice(i, 1);
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Background grid
+  ctx.strokeStyle = '#1a1a2e';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < canvas.width; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y < canvas.height; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+  }
+
+  // Targets
+  for (const t of targets) {
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.size, 0, Math.PI * 2);
+    ctx.fillStyle = t.color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Inner ring
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.size * 0.5, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.stroke();
+  }
+
+  // Bullets (impact flash)
+  for (const b of bullets) {
+    const alpha = b.life / 300;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, b.radius * (1 + (1 - alpha) * 2), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 255, 100, ${alpha})`;
+    ctx.fill();
+  }
+
+  // Explosions
+  for (const e of explosions) {
+    const progress = 1 - e.life / e.maxLife;
+    const alpha = 1 - progress;
+    const r = e.size * (1 + progress * 2);
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 120, 0, ${alpha * 0.6})`;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(e.x, e.y, r * 0.5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 255, 100, ${alpha * 0.8})`;
+    ctx.fill();
+  }
+
+  // Crosshair
+  const cx = crosshair.x;
+  const cy = crosshair.y;
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  const chSize = 20;
+  ctx.beginPath(); ctx.moveTo(cx - chSize, cy); ctx.lineTo(cx - 6, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + chSize, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - chSize); ctx.lineTo(cx, cy - 6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy + 6); ctx.lineTo(cx, cy + chSize); ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#0f0';
+  ctx.fill();
+
+  // HUD
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 24px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText(`SCORE: ${score}`, 20, 40);
+  ctx.textAlign = 'right';
+  ctx.fillText(`TIME: ${timeLeft}s`, canvas.width - 20, 40);
+
+  // Debug info
+  const dbg = document.getElementById('debug');
+  dbg.textContent = `BLE: ${connected ? 'ON' : 'OFF'} | Aim: ${controller.aimX}, ${controller.aimY} | Crosshair: ${Math.round(crosshair.x)}, ${Math.round(crosshair.y)}`;
+}
+
+// Initial draw
+resizeCanvas();
+draw();
+</script>
+</body>
+</html>
