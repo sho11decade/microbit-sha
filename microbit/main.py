@@ -10,7 +10,6 @@ Sends JSON-like messages over BLE UART:
 """
 
 from microbit import *
-import uart
 
 # --- BLE UART Setup ---
 uart.init(baudrate=115200)
