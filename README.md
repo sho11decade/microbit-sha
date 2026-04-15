@@ -109,10 +109,16 @@ python -m http.server 8000
 
 ### BLE デバイスが表示されない
 
-- Chrome または Edge を使用してください（Firefox/Safari は Web Bluetooth 非対応）
-- ブラウザの Bluetooth 権限を確認してください
-- micro:bit が他のデバイスに接続されていないことを確認してください
-- micro:bit の電源を入れ直してください
+以下を順番に確認してください：
+
+1. **ブラウザの確認**: Chrome または Edge を使用してください（Firefox/Safari は Web Bluetooth 非対応）
+2. **PC の Bluetooth を確認**: OS の設定で Bluetooth がオンになっていることを確認してください
+3. **ブラウザの Bluetooth 権限を確認**: ブラウザの設定で Bluetooth のアクセスが許可されていることを確認してください
+4. **micro:bit の電源を確認**: micro:bit の電源を入れ直してください（USB ケーブルを抜き差し、またはバッテリーパックの場合は電源スイッチをオフ→オン）
+5. **他の接続を解除**: micro:bit が他のデバイス（スマートフォンアプリ、他のブラウザタブ等）に接続されていないことを確認してください
+6. **Bluetooth キャッシュのクリア**: OS の Bluetooth 設定から micro:bit のペアリング情報を一度削除し、再度接続してみてください
+7. **「全デバイス表示」ボタン**: 通常の接続ボタンでデバイスが見つからない場合、ゲーム画面の「全デバイス表示」ボタンを使ってすべての BLE デバイスを一覧表示し、micro:bit を手動で選択してください
+8. **ファームウェアの再書き込み**: [Micro:bit Python Editor](https://python.microbit.org/) で `main.py` を再度書き込んでください
 
 ## ライセンス
 
