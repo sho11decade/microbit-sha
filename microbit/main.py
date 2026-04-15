@@ -1,19 +1,22 @@
 """
-Micro:bit V2 Shooting Game Controller
+Micro:bit V2 Shooting Game Controller (USB serial version)
 - Pin1: Tact switch (NO, software pull-up) for fire
 - Accelerometer: Aiming (x, y tilt)
-- Communication: UART over BLE (Nordic UART Service)
+- Communication: USB serial (uart.write)
 
-Sends messages over BLE UART:
+WARNING: This MicroPython script sends data over USB serial ONLY.
+The micro:bit V2 MicroPython firmware does NOT include BLE UART support.
+uart.write() calls uBit.serial.send() internally, which outputs to the
+USB serial port — there is no bridging to BLE.
+
+For BLE (wireless) communication, use the MakeCode version instead:
+  -> microbit/main.ts (MakeCode TypeScript with bluetooth.startUartService)
+
+See README.md for full setup instructions.
+
+Sends messages over UART:
   Fire event:   "F\n"
   Aim data:     "A:<x>,<y>\n"  (x, y in range approx -1024..1024)
-
-IMPORTANT: Flash this script using the micro:bit Python Editor
-(https://python.microbit.org/). On micro:bit V2, BLE UART (Nordic UART
-Service) is enabled by default in MicroPython — no special settings are
-required in the editor.
-Do NOT call uart.init() — calling uart.init(baudrate=...) reconfigures the
-UART for USB serial and disables BLE UART communication.
 """
 
 from microbit import *

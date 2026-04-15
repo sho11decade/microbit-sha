@@ -1,0 +1,12 @@
+{
+    "name": "microbit-sha-controller",
+    "description": "Micro:bit V2 Shooting Game Controller with BLE UART",
+    "dependencies": {
+        "core": "*",
+        "bluetooth": "*"
+    },
+    "files": [
+        "main.ts"
+    ],
+    "preferredEditor": "tsprj"
+}
