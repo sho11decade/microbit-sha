@@ -45,6 +45,17 @@ body {
 }
 #connectBtn:hover { background: #09d; }
 #connectBtn:disabled { background: #555; cursor: not-allowed; }
+#scanAllBtn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: #555;
+  color: #fff;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+#scanAllBtn:hover { background: #777; }
+#scanAllBtn:disabled { background: #333; cursor: not-allowed; }
 #gameCanvas {
   display: block;
   flex: 1;
@@ -88,7 +99,8 @@ body {
 <div id="header">
   <h1>🎯 Micro:bit Shooting Game</h1>
   <span id="status" class="disconnected">未接続</span>
-  <button id="connectBtn" onclick="connectBLE()">Micro:bit に接続</button>
+  <button id="connectBtn" onclick="connectBLE(false)">Micro:bit に接続</button>
+  <button id="scanAllBtn" onclick="connectBLE(true)" title="デバイスが見つからない場合、すべてのBLEデバイスを表示します">全デバイス表示</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -176,16 +188,24 @@ async function getUartServiceWithRetry(server) {
   throw lastError;
 }
 
-async function connectBLE() {
+async function connectBLE(scanAll) {
   if (!checkSecureContext()) return;
 
   const btn = document.getElementById('connectBtn');
+  const scanAllBtnEl = document.getElementById('scanAllBtn');
   btn.disabled = true;
+  scanAllBtnEl.disabled = true;
   try {
-    bleDevice = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'BBC micro:bit' }],
-      optionalServices: [UART_SERVICE_UUID]
-    });
+    const requestOptions = scanAll
+      ? { acceptAllDevices: true, optionalServices: [UART_SERVICE_UUID] }
+      : {
+          filters: [
+            { namePrefix: 'BBC micro:bit' },
+            { services: [UART_SERVICE_UUID] }
+          ],
+          optionalServices: [UART_SERVICE_UUID]
+        };
+    bleDevice = await navigator.bluetooth.requestDevice(requestOptions);
     bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
     updateStatusText('接続中...');
@@ -202,6 +222,7 @@ async function connectBLE() {
       alert(hint);
       updateStatus(false);
       btn.disabled = false;
+      scanAllBtnEl.disabled = false;
       return;
     }
 
@@ -214,7 +235,8 @@ async function connectBLE() {
   } catch (err) {
     console.error('BLE connection error:', err);
     if (err.name === 'NotFoundError') {
-      alert('micro:bit が見つからないか、ペアリングがキャンセルされました。');
+      alert('micro:bit が見つからないか、ペアリングがキャンセルされました。\n'
+        + 'デバイスが表示されない場合は「全デバイス表示」ボタンをお試しください。');
     } else if (err.name === 'SecurityError') {
       alert('BLE 接続にはユーザー操作が必要です。ボタンをクリックして接続してください。');
     } else {
@@ -223,6 +245,7 @@ async function connectBLE() {
     updateStatus(false);
   }
   btn.disabled = false;
+  scanAllBtnEl.disabled = false;
 }
 
 function onDisconnected() {
