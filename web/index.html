@@ -45,6 +45,15 @@ body {
 }
 #connectBtn:hover { background: #09d; }
 #connectBtn:disabled { background: #555; cursor: not-allowed; }
+#scanAllBtn {
+  padding: 8px 14px;
+  border: none;
+  border-radius: 6px;
+  background: #555;
+  color: #fff;
+  font-size: 0.85em;
+  cursor: pointer;
+}
 #scanAllBtn:hover { background: #777; }
 #scanAllBtn:disabled { background: #333; cursor: not-allowed; }
 #gameCanvas {
@@ -91,7 +100,7 @@ body {
   <h1>🎯 Micro:bit Shooting Game</h1>
   <span id="status" class="disconnected">未接続</span>
   <button id="connectBtn" onclick="connectBLE(false)">Micro:bit に接続</button>
-  <button id="scanAllBtn" onclick="connectBLE(true)" style="padding:8px 14px;border:none;border-radius:6px;background:#555;color:#fff;font-size:0.85em;cursor:pointer;" title="デバイスが見つからない場合、すべてのBLEデバイスを表示します">全デバイス表示</button>
+  <button id="scanAllBtn" onclick="connectBLE(true)" title="デバイスが見つからない場合、すべてのBLEデバイスを表示します">全デバイス表示</button>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -192,7 +201,6 @@ async function connectBLE(scanAll) {
       : {
           filters: [
             { namePrefix: 'BBC micro:bit' },
-            { namePrefix: 'BBC micro' },
             { services: [UART_SERVICE_UUID] }
           ],
           optionalServices: [UART_SERVICE_UUID]
