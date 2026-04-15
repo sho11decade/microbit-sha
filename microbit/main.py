@@ -9,11 +9,11 @@ Sends messages over BLE UART:
   Aim data:     "A:<x>,<y>\n"  (x, y in range approx -1024..1024)
 
 IMPORTANT: Flash this script using the micro:bit Python Editor
-(https://python.microbit.org/). Make sure Bluetooth is enabled in the
-firmware settings so the Nordic UART Service (NUS) is advertised.
-Do NOT call uart.init() — the default UART configuration is needed
-for BLE UART to work. Calling uart.init(baudrate=...) reconfigures the
-UART for USB serial and prevents BLE communication.
+(https://python.microbit.org/). On micro:bit V2, BLE UART (Nordic UART
+Service) is enabled by default in MicroPython — no special settings are
+required in the editor.
+Do NOT call uart.init() — calling uart.init(baudrate=...) reconfigures the
+UART for USB serial and disables BLE UART communication.
 """
 
 from microbit import *
