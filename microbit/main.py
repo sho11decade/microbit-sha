@@ -2,17 +2,21 @@
 Micro:bit V2 Shooting Game Controller
 - Pin1: Tact switch (NO, software pull-up) for fire
 - Accelerometer: Aiming (x, y tilt)
-- Communication: UART over BLE
+- Communication: UART over BLE (Nordic UART Service)
 
-Sends JSON-like messages over BLE UART:
+Sends messages over BLE UART:
   Fire event:   "F\n"
   Aim data:     "A:<x>,<y>\n"  (x, y in range approx -1024..1024)
+
+IMPORTANT: Flash this script using the micro:bit Python Editor
+(https://python.microbit.org/). Make sure Bluetooth is enabled in the
+firmware settings so the Nordic UART Service (NUS) is advertised.
+Do NOT call uart.init() — the default UART configuration is needed
+for BLE UART to work. Calling uart.init(baudrate=...) reconfigures the
+UART for USB serial and prevents BLE communication.
 """
 
 from microbit import *
-
-# --- BLE UART Setup ---
-uart.init(baudrate=115200)
 
 # --- Pin1 Setup: Tact switch (NO, pull-up) ---
 pin1.set_pull(pin1.PULL_UP)
