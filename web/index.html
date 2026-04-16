@@ -199,10 +199,7 @@ async function connectBLE(scanAll) {
     const requestOptions = scanAll
       ? { acceptAllDevices: true, optionalServices: [UART_SERVICE_UUID] }
       : {
-          filters: [
-            { namePrefix: 'BBC micro:bit' },
-            { services: [UART_SERVICE_UUID] }
-          ],
+          filters: [{ namePrefix: 'BBC micro:bit' }],
           optionalServices: [UART_SERVICE_UUID]
         };
     bleDevice = await navigator.bluetooth.requestDevice(requestOptions);
